@@ -55,7 +55,8 @@
  */
 #define OPENSSL_1_1_0 0x010100000L
 
-#define ERR_BUF_HEADER_SIZE 36
+#define FLB_ERR_CONN_HEADER "Failed to establish tls connection: "
+#define FLB_ERR_CONN_HEADER_SIZE (sizeof(FLB_ERR_CONN_HEADER) - 1)
 
 /* OpenSSL library context */
 struct tls_context {
@@ -1384,10 +1385,12 @@ static int tls_net_handshake(struct flb_tls *tls,
 {
     int ret = 0;
     long ssl_code = 0;
-    char err_buf[ERR_BUF_HEADER_SIZE + 256] = "Failed to establish tls connection: ";
+    char err_buf[FLB_ERR_CONN_HEADER_SIZE + 256] = {0};
     struct tls_session *session = ptr_session;
     struct tls_context *ctx;
     const char *x509_err;
+
+    strcpy(err_buf, FLB_ERR_CONN_HEADER);
 
     ctx = session->parent;
     pthread_mutex_lock(&ctx->mutex);
@@ -1457,7 +1460,7 @@ static int tls_net_handshake(struct flb_tls *tls,
             /* The SSL_ERROR_SYSCALL with errno value of 0 indicates unexpected
              *  EOF from the peer. This is fixed in OpenSSL 3.0.
              */
-
+            
             if (ret == 0) {
                 ssl_code = SSL_get_verify_result(session->ssl);
                 if (ssl_code != X509_V_OK) {
@@ -1466,33 +1469,18 @@ static int tls_net_handshake(struct flb_tls *tls,
                     flb_error("[tls] certificate verification failed, reason: %s (X509 code: %ld)", x509_err, ssl_code);
                 }
                 else {
-                    flb_error("[tls] error: unexpected EOF");
-                    if (ctx->verifier_ins &&
-                        ctx->verifier_ins->plugin &&
-                        ctx->verifier_ins->plugin->cb_connection_failure) {
-
-                        strncpy(&err_buf[ERR_BUF_HEADER_SIZE],
-                                "unexpected EOF",
-                                sizeof(err_buf)-ERR_BUF_HEADER_SIZE-1);
-                        ctx->verifier_ins
-                           ->plugin
-                           ->cb_connection_failure(ctx->verifier_ins, vhost, 0 /*port*/,
-                                -1, err_buf);
-                    }
+                    strncpy(&err_buf[FLB_ERR_CONN_HEADER_SIZE],
+                            "unexpected EOF",
+                            sizeof(err_buf)-FLB_ERR_CONN_HEADER_SIZE);
+                    flb_error("[tls] error: %s", &err_buf[FLB_ERR_CONN_HEADER_SIZE]);
+                    flb_tls_notify_error(ctx, -1, err_buf);
                 }
             } else {
                 ERR_error_string_n(ret,
-                                   &err_buf[ERR_BUF_HEADER_SIZE],
-                                   sizeof(err_buf)-ERR_BUF_HEADER_SIZE-1);
-                flb_error("[tls] error: %s", &err_buf[ERR_BUF_HEADER_SIZE]);
-                if (ctx->verifier_ins &&
-                    ctx->verifier_ins->plugin &&
-                    ctx->verifier_ins->plugin->cb_connection_failure) {
-                    ctx->verifier_ins->plugin->cb_connection_failure(ctx->verifier_ins,
-                                                                     vhost,
-                                                                     0 /*port*/,
-                                                                     ret, err_buf);
-                }
+                                   &err_buf[FLB_ERR_CONN_HEADER_SIZE],
+                                   sizeof(err_buf)-FLB_ERR_CONN_HEADER_SIZE);
+                flb_error("[tls] error: %s", &err_buf[FLB_ERR_CONN_HEADER_SIZE]);
+                flb_tls_notify_error(ctx, -1, err_buf);
             }
 
             pthread_mutex_unlock(&ctx->mutex);
