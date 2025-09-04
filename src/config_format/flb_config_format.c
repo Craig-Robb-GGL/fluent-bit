@@ -134,7 +134,7 @@ struct flb_cf *flb_cf_create()
     /* 'custom' type plugins */
     mk_list_init(&ctx->customs);
 
-    /* 'tls verifiers' type plugins */
+    /* 'network verifiers' type plugins */
     mk_list_init(&ctx->network_verifiers);
 
     /* pipeline */
